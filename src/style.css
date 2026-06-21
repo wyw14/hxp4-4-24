@@ -311,6 +311,51 @@ html, body {
   text-shadow: 0 0 6px rgba(68, 255, 68, 0.5);
 }
 
+.lock-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: linear-gradient(145deg, #1a1a3a, #050520);
+  border: 1px solid #2a2a5a;
+  border-radius: 4px;
+  color: #4466ff;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-shadow: 0 0 6px rgba(68, 102, 255, 0.5);
+}
+
+.lock-button:hover:not(:disabled) {
+  background: linear-gradient(145deg, #2a2a5a, #0a0a30);
+  box-shadow: 0 0 12px rgba(68, 102, 255, 0.3);
+}
+
+.lock-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.lock-button.active {
+  background: linear-gradient(145deg, #004466, #002233);
+  border-color: #00aaff;
+  color: #00ffff;
+  text-shadow: 0 0 10px rgba(0, 255, 255, 0.8);
+  animation: lockPulse 1.5s infinite;
+}
+
+@keyframes lockPulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(0, 255, 255, 0.4); }
+  50% { box-shadow: 0 0 20px rgba(0, 255, 255, 0.8); }
+}
+
+.lock-icon {
+  font-size: 14px;
+}
+
 .power-icon {
   font-size: 14px;
 }

@@ -124,6 +124,79 @@ export function getSignalColor(signal: Signal | null, strength: number): [number
   return [r + m, g + m, b + m];
 }
 
+export interface OptimalTuner {
+  vhf: number;
+  uhf: number;
+  antenna: number;
+}
+
+export function calculateOptimalTuner(
+  signal: Signal,
+  weatherOffset: WeatherOffset
+): OptimalTuner {
+  let effectiveVhfRange: [number, number] = [...signal.vhfRange] as [number, number];
+  let effectiveUhfRange: [number, number] = [...signal.uhfRange] as [number, number];
+  let effectiveAntennaRange: [number, number] = [...signal.antennaAngle] as [number, number];
+
+  if (signal.weatherAffected) {
+    effectiveVhfRange = [
+      effectiveVhfRange[0] + weatherOffset.vhfShift,
+      effectiveVhfRange[1] + weatherOffset.vhfShift
+    ];
+    effectiveUhfRange = [
+      effectiveUhfRange[0] + weatherOffset.uhfShift,
+      effectiveUhfRange[1] + weatherOffset.uhfShift
+    ];
+    effectiveAntennaRange = [
+      effectiveAntennaRange[0] + weatherOffset.antennaShift,
+      effectiveAntennaRange[1] + weatherOffset.antennaShift
+    ];
+  }
+
+  return {
+    vhf: centerOfRange(effectiveVhfRange),
+    uhf: centerOfRange(effectiveUhfRange),
+    antenna: centerOfRange(effectiveAntennaRange)
+  };
+}
+
+export interface TunerGradient {
+  vhf: number;
+  uhf: number;
+  antenna: number;
+}
+
+export function calculateTunerGradient(
+  currentTuner: TunerState,
+  signal: Signal,
+  weatherOffset: WeatherOffset,
+  stepSize: number = 0.5
+): TunerGradient {
+  const testMatch = (vhf: number, uhf: number, antenna: number): number => {
+    const testTuner = { vhf, uhf, antenna };
+    const match = findBestSignalMatch(testTuner, [signal], weatherOffset);
+    return match.strength;
+  };
+
+  const vhfPlus = testMatch(currentTuner.vhf + stepSize, currentTuner.uhf, currentTuner.antenna);
+  const vhfMinus = testMatch(currentTuner.vhf - stepSize, currentTuner.uhf, currentTuner.antenna);
+  const vhfGradient = (vhfPlus - vhfMinus) / (2 * stepSize);
+
+  const uhfPlus = testMatch(currentTuner.vhf, currentTuner.uhf + stepSize, currentTuner.antenna);
+  const uhfMinus = testMatch(currentTuner.vhf, currentTuner.uhf - stepSize, currentTuner.antenna);
+  const uhfGradient = (uhfPlus - uhfMinus) / (2 * stepSize);
+
+  const antennaPlus = testMatch(currentTuner.vhf, currentTuner.uhf, currentTuner.antenna + stepSize);
+  const antennaMinus = testMatch(currentTuner.vhf, currentTuner.uhf, currentTuner.antenna - stepSize);
+  const antennaGradient = (antennaPlus - antennaMinus) / (2 * stepSize);
+
+  return {
+    vhf: vhfGradient,
+    uhf: uhfGradient,
+    antenna: antennaGradient
+  };
+}
+
 export class WeatherSystem {
   private config: WeatherConfig;
   private offset: WeatherOffset;

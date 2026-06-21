@@ -6,6 +6,8 @@ import {
   getSignalColor,
   WeatherSystem,
   lerp,
+  calculateTunerGradient,
+  clamp,
   type SignalMatch
 } from './signal';
 import type { Signal, SignalsData, TunerState, WeatherOffset } from './types';
@@ -32,6 +34,14 @@ class Game {
   private binaryStream: string = '';
   private binaryTimer: number = 0;
 
+  private lockEnabled: boolean = false;
+  private lockedSignalId: string | null = null;
+  private lowSignalCounter: number = 0;
+  private readonly LOCK_THRESHOLD: number = 0.6;
+  private readonly UNLOCK_THRESHOLD: number = 0.3;
+  private readonly MAX_LOW_SIGNAL_FRAMES: number = 180;
+  private readonly AUTO_TUNE_RATE: number = 8;
+
   private elements: {
     signalFill: HTMLElement;
     signalOverlay: HTMLElement;
@@ -40,6 +50,7 @@ class Game {
     binaryStream: HTMLElement;
     foundCount: HTMLElement;
     audioToggle: HTMLButtonElement;
+    lockToggle: HTMLButtonElement;
   };
 
   constructor() {
@@ -61,7 +72,8 @@ class Game {
       signalDescription: get('signalOverlay').querySelector('.signal-description') as HTMLElement,
       binaryStream: get('signalOverlay').querySelector('.binary-stream') as HTMLElement,
       foundCount: get('foundCount'),
-      audioToggle: get('audioToggle') as HTMLButtonElement
+      audioToggle: get('audioToggle') as HTMLButtonElement,
+      lockToggle: get('lockToggle') as HTMLButtonElement
     };
   }
 
@@ -108,6 +120,17 @@ class Game {
       }
     ], (param: KnobParam, value: number) => {
       this.tuner[param] = value;
+      if (this.lockEnabled) {
+        this.disableLock();
+      }
+    });
+
+    this.elements.lockToggle.addEventListener('click', () => {
+      if (this.lockEnabled) {
+        this.disableLock();
+      } else if (this.smoothedStrength >= this.LOCK_THRESHOLD && this.currentMatch.signal) {
+        this.enableLock();
+      }
     });
 
     this.elements.audioToggle.addEventListener('click', async () => {
@@ -159,6 +182,80 @@ class Game {
     ];
   }
 
+  private enableLock(): void {
+    if (this.currentMatch.signal && this.smoothedStrength >= this.LOCK_THRESHOLD) {
+      this.lockEnabled = true;
+      this.lockedSignalId = this.currentMatch.signal.id;
+      this.lowSignalCounter = 0;
+      this.elements.lockToggle.classList.add('active');
+      this.elements.lockToggle.disabled = false;
+    }
+  }
+
+  private disableLock(): void {
+    this.lockEnabled = false;
+    this.lockedSignalId = null;
+    this.lowSignalCounter = 0;
+    this.elements.lockToggle.classList.remove('active');
+  }
+
+  private updateLockButtonState(): void {
+    if (this.lockEnabled) {
+      this.elements.lockToggle.disabled = false;
+    } else {
+      const canLock = this.smoothedStrength >= this.LOCK_THRESHOLD && this.currentMatch.signal !== null;
+      this.elements.lockToggle.disabled = !canLock;
+    }
+  }
+
+  private autoTune(): void {
+    if (!this.lockEnabled || !this.lockedSignalId) return;
+
+    const lockedSignal = this.signals.find(s => s.id === this.lockedSignalId);
+    if (!lockedSignal) {
+      this.disableLock();
+      return;
+    }
+
+    if (this.smoothedStrength < this.UNLOCK_THRESHOLD) {
+      this.lowSignalCounter++;
+      if (this.lowSignalCounter >= this.MAX_LOW_SIGNAL_FRAMES) {
+        this.disableLock();
+        return;
+      }
+    } else {
+      this.lowSignalCounter = Math.max(0, this.lowSignalCounter - 2);
+    }
+
+    const gradient = calculateTunerGradient(this.tuner, lockedSignal, this.weatherOffset, 0.5);
+
+    const vhfConfig = this.knobController?.['configs'].get('vhf');
+    const uhfConfig = this.knobController?.['configs'].get('uhf');
+    const antennaConfig = this.knobController?.['configs'].get('antenna');
+
+    const vhfStep = clamp(gradient.vhf * this.AUTO_TUNE_RATE, -1.5, 1.5);
+    const uhfStep = clamp(gradient.uhf * this.AUTO_TUNE_RATE, -2.5, 2.5);
+    const antennaStep = clamp(gradient.antenna * this.AUTO_TUNE_RATE, -3, 3);
+
+    if (Math.abs(vhfStep) > 0.05 && vhfConfig) {
+      const newVhf = clamp(this.tuner.vhf + vhfStep, vhfConfig.min, vhfConfig.max);
+      this.knobController?.setValue('vhf', newVhf, false);
+      this.tuner.vhf = newVhf;
+    }
+
+    if (Math.abs(uhfStep) > 0.05 && uhfConfig) {
+      const newUhf = clamp(this.tuner.uhf + uhfStep, uhfConfig.min, uhfConfig.max);
+      this.knobController?.setValue('uhf', newUhf, false);
+      this.tuner.uhf = newUhf;
+    }
+
+    if (Math.abs(antennaStep) > 0.05 && antennaConfig) {
+      const newAntenna = clamp(this.tuner.antenna + antennaStep, antennaConfig.min, antennaConfig.max);
+      this.knobController?.setValue('antenna', newAntenna, false);
+      this.tuner.antenna = newAntenna;
+    }
+  }
+
   private updateUI(): void {
     const fillPercent = Math.min(100, this.smoothedStrength * 100);
     this.elements.signalFill.style.width = `${fillPercent.toFixed(1)}%`;
@@ -200,6 +297,8 @@ class Game {
       this.weatherOffset = weatherResult.offset;
       this.updateSignalMatch();
       this.updateSmoothing();
+      this.updateLockButtonState();
+      this.autoTune();
 
       if (this.renderer) {
         this.renderer.render({
